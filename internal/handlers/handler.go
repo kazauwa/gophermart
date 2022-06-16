@@ -61,12 +61,15 @@ func (g *Gophermart) registerUser(c *gin.Context) {
 		return
 	}
 
-	user, err := storage.DB.InsertUser(
-		c.Request.Context(),
-		jsonRequest.Login,
-		jsonRequest.Password,
-	)
+	user := models.NewUser()
+	user.Login = jsonRequest.Login
+	if err := user.SetPassword(jsonRequest.Password); err != nil {
+		log.Err(err).Caller().Msg("")
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
 
+	err := user.Insert(c.Request.Context())
 	var pgerror *pgconn.PgError
 	switch {
 	case errors.As(err, &pgerror) && pgerror.Code == pgerrcode.UniqueViolation:
@@ -100,7 +103,8 @@ func (g *Gophermart) login(c *gin.Context) {
 		return
 	}
 
-	user, err := storage.DB.GetUserByLogin(c.Request.Context(), jsonRequest.Login)
+	user := models.NewUser()
+	err := user.GetByLogin(c.Request.Context(), jsonRequest.Login)
 
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -168,7 +172,8 @@ func (g *Gophermart) uploadOrder(c *gin.Context) {
 		return
 	}
 
-	order, err := storage.DB.GetOrder(c.Request.Context(), orderID)
+	order := models.NewOrder()
+	err = order.GetByID(c.Request.Context(), orderID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		log.Err(err).Caller().Msg("error fetching order from db")
 		c.AbortWithStatus(http.StatusInternalServerError)
@@ -184,8 +189,11 @@ func (g *Gophermart) uploadOrder(c *gin.Context) {
 	}
 
 	switch {
-	case order == nil:
-		err = storage.DB.InsertOrder(c.Request.Context(), orderID, currentUser.ID)
+	case errors.Is(err, pgx.ErrNoRows):
+		order := models.NewOrder()
+		order.ID = orderID
+		order.UserID = currentUser.ID
+		err = order.Insert(c.Request.Context())
 		if err != nil {
 			log.Err(err).Caller().Msg("error inserting order")
 			c.AbortWithStatus(http.StatusInternalServerError)
@@ -214,7 +222,7 @@ func (g *Gophermart) listOrders(c *gin.Context) {
 		return
 	}
 
-	userOrders, err := g.db.GetUserOrders(ctx, currentUser.ID)
+	userOrders, err := currentUser.GetOrders(ctx)
 	if err != nil {
 		log.Err(err).Caller().Msg("cannot fetch user orders")
 		c.AbortWithStatus(http.StatusInternalServerError)
@@ -242,7 +250,7 @@ func (g *Gophermart) getBalance(c *gin.Context) {
 		Withdrawn decimal.Decimal `json:"withdrawn"`
 	}
 
-	totalWithdrawn, err := g.db.TotalWithdrawn(c.Request.Context(), currentUser.ID)
+	totalWithdrawn, err := currentUser.TotalWithdrawn(c.Request.Context())
 	if err != nil {
 		log.Err(err).Caller().Msg("cannot fetch withdrawal sum from db")
 		c.AbortWithStatus(http.StatusInternalServerError)
@@ -288,7 +296,8 @@ func (g *Gophermart) withdraw(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	_, err = g.db.GetOrder(ctx, orderID)
+	order := models.NewOrder()
+	err = order.GetByID(ctx, orderID)
 	switch {
 	case err != nil && !errors.Is(err, pgx.ErrNoRows):
 		log.Err(err).Caller().Msg("error looking up order id")
@@ -300,20 +309,13 @@ func (g *Gophermart) withdraw(c *gin.Context) {
 		return
 	}
 
-	err = currentUser.Withdraw(jsonRequest.Sum)
+	err = currentUser.Withdraw(ctx, orderID, jsonRequest.Sum)
+	var pgerror *pgconn.PgError
 	switch {
 	case errors.Is(err, models.ErrInsufficientBalance):
 		c.AbortWithStatus(http.StatusPaymentRequired)
 		return
-	case err != nil:
-		log.Err(err).Caller().Msg("error withdrawing points")
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
 
-	var pgerror *pgconn.PgError
-	err = g.db.Withdraw(ctx, currentUser, orderID, jsonRequest.Sum)
-	switch {
 	case errors.As(err, &pgerror) && pgerror.Code == pgerrcode.UniqueViolation:
 		log.Error().Caller().Msg("withdrawal for order already registered")
 		c.AbortWithStatus(http.StatusConflict)
@@ -337,7 +339,7 @@ func (g *Gophermart) listWithdrawals(c *gin.Context) {
 		return
 	}
 
-	withdrawals, err := g.db.GetWithdrawalHistory(c.Request.Context(), currentUser.ID)
+	withdrawals, err := currentUser.GetWithdrawalHistory(c.Request.Context())
 	if err != nil {
 		log.Err(err).Caller().Msg("cannot fetch withdrawals from db")
 		c.AbortWithStatus(http.StatusInternalServerError)

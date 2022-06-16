@@ -7,7 +7,7 @@ type ArgonParams struct {
 	Iterations  uint32 `yaml:"iterations"`
 	Parallelism uint8  `yaml:"parallelism"`
 	SaltLength  uint32 `yaml:"salt_length"`
-	KeyLength   uint32 `yanml:"key_length"`
+	KeyLength   uint32 `yaml:"key_length"`
 }
 
 type Config struct {

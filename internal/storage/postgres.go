@@ -4,25 +4,19 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgtype"
 	shopspring "github.com/jackc/pgtype/ext/shopspring-numeric"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
-	"github.com/shopspring/decimal"
-
-	"github.com/kazauwa/gophermart/internal/models"
-	"github.com/kazauwa/gophermart/internal/models/order"
-	"github.com/kazauwa/gophermart/internal/utils"
 )
 
 type Postgres struct {
-	pool *pgxpool.Pool
-	lock sync.RWMutex
+	Pool *pgxpool.Pool
+	Lock sync.RWMutex
 }
 
-var DB *Postgres
+var db *Postgres
 
 const (
 	createUsersTableQuery string = `CREATE TABLE IF NOT EXISTS users(
@@ -48,7 +42,7 @@ const (
 )
 
 func NewPostgres(ctx context.Context, dsn string) error {
-	if DB != nil {
+	if db != nil {
 		return fmt.Errorf("DB connection already exists")
 	}
 
@@ -67,19 +61,19 @@ func NewPostgres(ctx context.Context, dsn string) error {
 	}
 
 	postgres := &Postgres{
-		pool: pool,
+		Pool: pool,
 	}
 
 	if err = postgres.initDB(ctx, pool); err != nil {
 		return err
 	}
 
-	DB = postgres
+	db = postgres
 	return nil
 }
 
 func GetDB() *Postgres {
-	return DB
+	return db
 }
 
 func (p *Postgres) initDB(ctx context.Context, pool *pgxpool.Pool) error {
@@ -92,333 +86,6 @@ func (p *Postgres) initDB(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if _, err := pool.Exec(ctx, createWithdrawalsTableQuery); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (p *Postgres) GetUserByLogin(ctx context.Context, login string) (*models.User, error) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	var id int
-	var password string
-	var balance decimal.Decimal
-
-	err := p.pool.QueryRow(
-		ctx,
-		"SELECT id, password, balance FROM users WHERE login = $1",
-		login,
-	).Scan(&id, &password, &balance)
-	if err != nil {
-		return nil, err
-	}
-
-	return models.NewUser(id, login, password, balance), nil
-}
-
-func (p *Postgres) GetUserByID(ctx context.Context, id int) (*models.User, error) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	var login string
-	var password string
-	var balance decimal.Decimal
-
-	err := p.pool.QueryRow(
-		ctx,
-		"SELECT login, password, balance FROM users WHERE id = $1",
-		id,
-	).Scan(&login, &password, &balance)
-	if err != nil {
-		return nil, err
-	}
-
-	return models.NewUser(id, login, password, balance), nil
-}
-
-func (p *Postgres) InsertUser(ctx context.Context, login, password string) (*models.User, error) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var rollbackErr error
-	defer func() {
-		rollbackErr = tx.Rollback(ctx)
-	}()
-
-	insertQuery := "INSERT INTO users (login, password) VALUES ($1, $2) RETURNING id"
-	passwordHash, err := utils.GeneratePasswordHash(password)
-	if err != nil {
-		return nil, err
-	}
-
-	var id int
-	err = tx.QueryRow(ctx, insertQuery, login, passwordHash).Scan(&id)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return models.NewUser(id, login, password, decimal.Decimal{}), rollbackErr
-}
-
-func (p *Postgres) GetOrder(ctx context.Context, orderID int64) (*order.Order, error) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	var userID int
-	err := p.pool.QueryRow(
-		ctx,
-		"SELECT user_id FROM orders WHERE id = $1",
-		orderID,
-	).Scan(&userID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &order.Order{ID: orderID, UserID: userID}, nil
-}
-
-func (p *Postgres) GetUnprocessedOrders(ctx context.Context) ([]*order.Order, error) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	var nOrders int
-	err := p.pool.QueryRow(
-		ctx,
-		"SELECT count(*) FROM orders WHERE status IN ('NEW', 'PROCESSING')",
-	).Scan(&nOrders)
-	if err != nil {
-		return nil, err
-	}
-
-	orders := make([]*order.Order, 0, nOrders)
-	rows, err := p.pool.Query(ctx, "SELECT id, user_id FROM orders WHERE status IN ('NEW', 'PROCESSING')")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var orderID int64
-		var userID int
-		if err = rows.Scan(&orderID, &userID); err != nil {
-			return nil, err
-		}
-		orders = append(orders, &order.Order{ID: orderID, UserID: userID})
-	}
-	return orders, nil
-}
-
-func (p *Postgres) InsertOrder(ctx context.Context, orderID int64, userID int) error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-
-	var rollbackErr error
-	defer func() {
-		rollbackErr = tx.Rollback(ctx)
-	}()
-
-	insertQuery := "INSERT INTO orders (id, user_id) VALUES ($1, $2)"
-
-	if _, err = tx.Exec(ctx, insertQuery, orderID, userID); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	return rollbackErr
-}
-
-func (p *Postgres) GetUserOrders(ctx context.Context, userID int) ([]*order.Order, error) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	var nOrders int
-	err := p.pool.QueryRow(
-		ctx,
-		"SELECT count(id) FROM orders WHERE user_id = $1",
-		userID,
-	).Scan(&nOrders)
-	if err != nil {
-		return nil, err
-	}
-
-	orders := make([]*order.Order, 0, nOrders)
-	selectQuery := "SELECT id, status, accrual, uploaded_at FROM orders WHERE user_id = $1"
-	rows, err := p.pool.Query(ctx, selectQuery, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var orderID int64
-		var status string
-		var accrual decimal.Decimal
-		var uploadedAt time.Time
-		if err = rows.Scan(&orderID, &status, &accrual, &uploadedAt); err != nil {
-			return nil, err
-		}
-		fetchedOrder := &order.Order{
-			ID:         orderID,
-			Status:     status,
-			Accrual:    accrual,
-			UploadedAt: uploadedAt,
-		}
-		orders = append(orders, fetchedOrder)
-	}
-	return orders, nil
-}
-
-func (p *Postgres) GetWithdrawalHistory(ctx context.Context, userID int) ([]*models.Withdrawal, error) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	var nWithdrawals int
-	err := p.pool.QueryRow(
-		ctx,
-		"SELECT count(id) FROM withdrawals WHERE user_id = $1",
-		userID,
-	).Scan(&nWithdrawals)
-	if err != nil {
-		return nil, err
-	}
-
-	withdrawals := make([]*models.Withdrawal, 0, nWithdrawals)
-	query := `SELECT order_id, amount, processed_at
-		FROM withdrawals
-		WHERE user_id = $1
-		ORDER BY processed_at ASC`
-	rows, err := p.pool.Query(ctx, query, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var orderID int64
-		var sum decimal.Decimal
-		var processedAt time.Time
-		if err = rows.Scan(&orderID, &sum, &processedAt); err != nil {
-			return nil, err
-		}
-		withdrawal := models.NewWithdrawal(orderID, sum, processedAt)
-		withdrawals = append(withdrawals, withdrawal)
-	}
-	return withdrawals, nil
-}
-
-func (p *Postgres) TotalWithdrawn(ctx context.Context, userID int) (decimal.NullDecimal, error) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	var sum decimal.NullDecimal
-	query := "SELECT sum(amount) FROM withdrawals WHERE user_id = $1"
-	err := p.pool.QueryRow(ctx, query, userID).Scan(&sum)
-	if err != nil {
-		return sum, err
-	}
-
-	return sum, nil
-}
-
-func (p *Postgres) Withdraw(
-	ctx context.Context,
-	user *models.User,
-	orderID int64,
-	sum decimal.Decimal,
-) error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-
-	var rollbackErr error
-	defer func() {
-		rollbackErr = tx.Rollback(ctx)
-	}()
-
-	insertQuery := `INSERT INTO withdrawals (
-		order_id, user_id, amount, processed_at
-	  ) 
-	  VALUES 
-		($1, $2, $3, $4)`
-
-	if _, err = tx.Exec(ctx, insertQuery, orderID, user.ID, sum, time.Now()); err != nil {
-		return err
-	}
-
-	updateQuery := "UPDATE users SET balance = $1 WHERE id = $2"
-	if _, err = tx.Exec(ctx, updateQuery, user.Balance, user.ID); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	return rollbackErr
-}
-
-func (p *Postgres) Deposit(
-	ctx context.Context,
-	user *models.User,
-	orderID int64,
-	accrual decimal.Decimal,
-) error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-
-	var rollbackErr error
-	defer func() {
-		rollbackErr = tx.Rollback(ctx)
-	}()
-
-	orderUpdateQuery := `UPDATE orders SET status = 'PROCESSED', accrual = $1 WHERE id = $2`
-
-	if _, err = tx.Exec(ctx, orderUpdateQuery, accrual, orderID); err != nil {
-		return err
-	}
-
-	userUpdateQuery := "UPDATE users SET balance = $1 WHERE id = $2"
-	if _, err = tx.Exec(ctx, userUpdateQuery, user.Balance, user.ID); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	return rollbackErr
-}
-
-func (p *Postgres) SetOrderFailed(ctx context.Context, orderID int64) error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	orderUpdateQuery := `UPDATE orders SET status = 'FAILED' WHERE id = $1`
-	if _, err := p.pool.Exec(ctx, orderUpdateQuery, orderID); err != nil {
 		return err
 	}
 

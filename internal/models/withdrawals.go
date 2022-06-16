@@ -15,12 +15,8 @@ type Withdrawal struct {
 	ProcessedAt time.Time       `json:"processed_at"`
 }
 
-func NewWithdrawal(orderID int64, sum decimal.Decimal, processedAt time.Time) *Withdrawal {
-	return &Withdrawal{
-		OrderID:     orderID,
-		Sum:         sum,
-		ProcessedAt: processedAt,
-	}
+func NewWithdrawal() *Withdrawal {
+	return &Withdrawal{}
 }
 
 func (w *Withdrawal) MarshalJSON() ([]byte, error) {

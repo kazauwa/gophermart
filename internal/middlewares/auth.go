@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
 
-	"github.com/kazauwa/gophermart/internal/storage"
+	"github.com/kazauwa/gophermart/internal/models"
 )
 
 func AuthRequired(c *gin.Context) {
@@ -21,7 +21,8 @@ func AuthRequired(c *gin.Context) {
 		return
 	}
 
-	user, err := storage.DB.GetUserByID(c.Request.Context(), userID)
+	user := models.NewUser()
+	err := user.GetByID(c.Request.Context(), userID)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		session.Delete("user")

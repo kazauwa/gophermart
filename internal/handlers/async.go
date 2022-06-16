@@ -11,7 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/kazauwa/gophermart/internal/gophermart"
-	"github.com/kazauwa/gophermart/internal/storage"
+	"github.com/kazauwa/gophermart/internal/models"
 	"github.com/kazauwa/gophermart/internal/utils"
 )
 
@@ -46,8 +46,7 @@ func (g *Gophermart) ScheduleTasks(ctx context.Context) error {
 }
 
 func updateUserBalance(ctx context.Context, cfg *gophermart.Config, client *http.Client) error {
-	db := storage.GetDB()
-	orders, err := db.GetUnprocessedOrders(ctx)
+	orders, err := models.GetUnprocessedOrders(ctx)
 	if err != nil {
 		return err
 	}
@@ -73,24 +72,20 @@ func updateUserBalance(ctx context.Context, cfg *gophermart.Config, client *http
 
 		switch orderInfo.Status {
 		case utils.Invalid:
-			if err := db.SetOrderFailed(ctx, order.ID); err != nil {
+			if err := order.SetFailed(ctx, order.ID); err != nil {
 				log.Err(err).Caller().Msg("error processing order")
 				return err
 			}
 
 		case utils.Processed:
-			user, err := db.GetUserByID(ctx, order.UserID)
+			user := models.NewUser()
+			err := user.GetByID(ctx, order.UserID)
 			if err != nil {
 				log.Err(err).Caller().Msg("error fetching user")
 				return err
 			}
 
-			if err := user.Deposit(orderInfo.Accrual); err != nil {
-				log.Err(err).Caller().Msg("error depositing points to user balance")
-				return err
-			}
-
-			if err := db.Deposit(ctx, user, order.ID, orderInfo.Accrual); err != nil {
+			if err := user.Deposit(ctx, order.ID, orderInfo.Accrual); err != nil {
 				log.Err(err).Caller().Msg("error depositing points to user balance")
 				return err
 			}
