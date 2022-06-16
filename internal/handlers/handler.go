@@ -86,7 +86,6 @@ func (g *Gophermart) registerUser(c *gin.Context) {
 		c.AbortWithStatus(http.StatusInternalServerError)
 	}
 	c.Status(http.StatusOK)
-	return
 }
 
 func (g *Gophermart) login(c *gin.Context) {
@@ -145,7 +144,6 @@ func (g *Gophermart) login(c *gin.Context) {
 	}
 
 	c.Status(http.StatusOK)
-	return
 }
 
 func (g *Gophermart) uploadOrder(c *gin.Context) {
@@ -187,7 +185,12 @@ func (g *Gophermart) uploadOrder(c *gin.Context) {
 
 	switch {
 	case order == nil:
-		storage.DB.InsertOrder(c.Request.Context(), orderID, currentUser.ID)
+		err = storage.DB.InsertOrder(c.Request.Context(), orderID, currentUser.ID)
+		if err != nil {
+			log.Err(err).Caller().Msg("error inserting order")
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
 		c.Status(http.StatusAccepted)
 		return
 
@@ -223,7 +226,6 @@ func (g *Gophermart) listOrders(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, userOrders)
-	return
 }
 
 func (g *Gophermart) getBalance(c *gin.Context) {
@@ -250,7 +252,6 @@ func (g *Gophermart) getBalance(c *gin.Context) {
 	response.Balance = currentUser.Balance
 	response.Withdrawn = totalWithdrawn.Decimal
 	c.JSON(http.StatusOK, response)
-	return
 }
 
 func (g *Gophermart) withdraw(c *gin.Context) {
@@ -301,7 +302,7 @@ func (g *Gophermart) withdraw(c *gin.Context) {
 
 	err = currentUser.Withdraw(jsonRequest.Sum)
 	switch {
-	case errors.Is(err, models.InsufficientBalanceError):
+	case errors.Is(err, models.ErrInsufficientBalance):
 		c.AbortWithStatus(http.StatusPaymentRequired)
 		return
 	case err != nil:
@@ -325,7 +326,6 @@ func (g *Gophermart) withdraw(c *gin.Context) {
 	}
 
 	c.Status(http.StatusOK)
-	return
 }
 
 func (g *Gophermart) listWithdrawals(c *gin.Context) {
@@ -350,5 +350,4 @@ func (g *Gophermart) listWithdrawals(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, withdrawals)
-	return
 }

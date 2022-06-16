@@ -61,7 +61,10 @@ func main() {
 	store := cookie.NewStore([]byte(cfg.CookieSecret))
 	router.Use(sessions.Sessions("_gophermart_s", store))
 	// TODO: configure via env
-	router.SetTrustedProxies(nil)
+	err = router.SetTrustedProxies(nil)
+	if err != nil {
+		log.Fatal().Err(err).Caller().Msg("Cannot start service")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -35,5 +35,4 @@ func AuthRequired(c *gin.Context) {
 
 	c.Set("user", user)
 	c.Next()
-	return
 }

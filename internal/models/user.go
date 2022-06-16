@@ -8,7 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-var InsufficientBalanceError = errors.New("insufficient balance")
+var ErrInsufficientBalance = errors.New("insufficient balance")
 
 type User struct {
 	ID       int             `json:"-"`
@@ -32,7 +32,7 @@ func (u *User) Withdraw(sum decimal.Decimal) error {
 	}
 
 	if sum.GreaterThan(u.Balance) {
-		return InsufficientBalanceError
+		return ErrInsufficientBalance
 	}
 	u.Balance = u.Balance.Sub(sum)
 
