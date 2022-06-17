@@ -59,9 +59,9 @@ func (g *Gophermart) updateUserBalance(ctx context.Context) error {
 		var orderDoesNotExistError *utils.OrderDoesNotExistError
 
 		switch {
-		case errors.As(err, &rateLimitedError): // TODO
-			continue
-		case errors.As(err, &orderDoesNotExistError): // TODO
+		case errors.As(err, &rateLimitedError):
+			time.Sleep(time.Duration(rateLimitedError.RetryAfter))
+		case errors.As(err, &orderDoesNotExistError):
 			continue
 		case err != nil:
 			log.Err(err).Caller().Msg("error accessing accrual system")

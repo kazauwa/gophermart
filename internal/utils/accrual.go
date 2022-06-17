@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
@@ -27,7 +28,7 @@ type OrderInfo struct {
 }
 
 type RateLimitedError struct {
-	RetryAfter int
+	RetryAfter time.Duration
 }
 
 func (e *RateLimitedError) Error() string {
@@ -81,7 +82,7 @@ func GetOrderInfo(
 			return nil, err
 		}
 
-		return nil, &RateLimitedError{RetryAfter: retryAfter}
+		return nil, &RateLimitedError{RetryAfter: time.Second * time.Duration(retryAfter)}
 
 	case http.StatusInternalServerError:
 		return nil, fmt.Errorf("acrrual system returned error")
