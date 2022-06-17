@@ -1,16 +1,14 @@
-package handlers
+package gophermart
 
 import (
 	"context"
 	"errors"
-	"net/http"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/kazauwa/gophermart/internal/gophermart"
 	"github.com/kazauwa/gophermart/internal/models"
 	"github.com/kazauwa/gophermart/internal/utils"
 )
@@ -18,34 +16,34 @@ import (
 func (g *Gophermart) ScheduleTasks(ctx context.Context) error {
 	pollTicker := time.NewTicker(g.cfg.PollInterval)
 	defer pollTicker.Stop()
-
 	errg, innerCtx := errgroup.WithContext(ctx)
 
-	pollWorker := utils.NewWorker()
-
-	client := utils.NewHTTPClient()
-
-	pollWorker.RegisterFunc(func() error {
-		if err := updateUserBalance(innerCtx, g.cfg, client); err != nil {
-			return err
+	events := make(chan struct{})
+	errg.Go(func() error {
+		for range events {
+			if err := g.updateUserBalance(innerCtx); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
-	errg.Go(pollWorker.Listen)
 
 	for {
 		select {
 		case <-pollTicker.C:
-			pollWorker.Do()
+			select {
+			case events <- struct{}{}:
+			default:
+			}
 		case <-innerCtx.Done():
-			pollWorker.Stop()
+			close(events)
 			err := errg.Wait()
 			return err
 		}
 	}
 }
 
-func updateUserBalance(ctx context.Context, cfg *gophermart.Config, client *http.Client) error {
+func (g *Gophermart) updateUserBalance(ctx context.Context) error {
 	orders, err := models.GetUnprocessedOrders(ctx)
 	if err != nil {
 		return err
@@ -56,7 +54,7 @@ func updateUserBalance(ctx context.Context, cfg *gophermart.Config, client *http
 	}
 
 	for _, order := range orders {
-		orderInfo, err := utils.GetOrderInfo(ctx, cfg.AccrualSystemAddr, client, order.ID)
+		orderInfo, err := utils.GetOrderInfo(ctx, g.cfg.AccrualSystemAddr, g.client, order.ID)
 		var rateLimitedError *utils.RateLimitedError
 		var orderDoesNotExistError *utils.OrderDoesNotExistError
 

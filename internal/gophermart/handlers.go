@@ -1,4 +1,4 @@
-package handlers
+package gophermart
 
 import (
 	"errors"
@@ -14,26 +14,10 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 
-	"github.com/kazauwa/gophermart/internal/gophermart"
 	"github.com/kazauwa/gophermart/internal/middlewares"
 	"github.com/kazauwa/gophermart/internal/models"
-	"github.com/kazauwa/gophermart/internal/storage"
 	"github.com/kazauwa/gophermart/internal/utils"
 )
-
-type Gophermart struct {
-	cfg    *gophermart.Config
-	client *http.Client
-	db     *storage.Postgres
-}
-
-func GetGophermartApp(cfg *gophermart.Config, db *storage.Postgres) (*Gophermart, error) {
-	return &Gophermart{
-		cfg:    cfg,
-		client: utils.NewHTTPClient(),
-		db:     db,
-	}, nil
-}
 
 func (g *Gophermart) CreateRouter(router *gin.Engine) {
 	userAPI := router.Group("/api/user")
